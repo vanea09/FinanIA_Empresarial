@@ -2,121 +2,208 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Asesoría Financiera IA</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>FinanIA Empresarial | Asesoría Financiera IA</title>
+
+    <meta name="description"
+          content="Asesoría virtual especializada en vehículos, financiamiento y servicios de agencias de autos.">
+
+    <meta name="theme-color" content="#0d6efd">
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+    <link rel="manifest"
+          href="{{ url_for('static', filename='manifest.json') }}">
 </head>
+
 <body>
 
 <div class="main-container">
 
     <div class="page">
 
-    <div class="info-box">
+        <div class="info-box">
 
-    <h1>Asesoría Financiera IA</h1>
+            <h1>Asesoría Financiera IA</h1>
 
-    <p>
-    Esta inteligencia artificial fue creada para ayudar a las personas a conocer
-    información sobre vehículos, financiamiento, mantenimiento y servicios de agencias de autos.
-    </p>
+            <p>
+                Esta inteligencia artificial fue creada para ayudar a las
+                personas a conocer información sobre vehículos, financiamiento,
+                mantenimiento y servicios de agencias de autos.
+            </p>
 
-    <h3>Temas que maneja</h3>
+            <h3>Temas que maneja</h3>
 
-    <ul>
-        <li>Autos nuevos y seminuevos</li>
-        <li>Financiamiento automotriz</li>
-        <li>Crédito para vehículos</li>
-        <li>Mantenimiento preventivo</li>
-        <li>Garantías de fábrica</li>
-        <li>Seguros para autos</li>
-        <li>Marcas y modelos</li>
-    </ul>
+            <ul>
+                <li>Autos nuevos y seminuevos</li>
+                <li>Financiamiento automotriz</li>
+                <li>Crédito para vehículos</li>
+                <li>Mantenimiento preventivo</li>
+                <li>Garantías de fábrica</li>
+                <li>Seguros para autos</li>
+                <li>Marcas y modelos</li>
+            </ul>
 
-    <p>
-        <h2>¿Qué hace la IA?</h2>
+            <h2>¿Qué hace la IA?</h2>
 
-    <p>
-    La IA analiza tus preguntas y responde con información sencilla sobre vehículos,
-    servicios de agencia y opciones de compra.
-    </p>
+            <p>
+                La IA analiza tus preguntas y responde con información sencilla
+                sobre vehículos, servicios de agencia y opciones de compra.
+            </p>
 
-    <p>
-       <h2>Objetivo</h2>
+            <h2>Objetivo</h2>
 
-    <p>
-    Ayudar a los usuarios a tomar mejores decisiones al momento de comprar,
-    financiar o dar mantenimiento a un vehículo.
-    </p>
-    </p>
+            <p>
+                Ayudar a los usuarios a tomar mejores decisiones al momento de
+                comprar, financiar o dar mantenimiento a un vehículo.
+            </p>
 
-    <div class="example-box">
-        <h4>Ejemplos de preguntas</h4>
+            <div class="example-box">
+                <h4>Ejemplos de preguntas</h4>
 
-        <p>• ¿Qué documentos necesito para financiar un auto?</p>
-        <p>• ¿Qué diferencia hay entre un auto nuevo y uno seminuevo?</p>
-        <p>• ¿Cada cuánto debo realizar el servicio de mantenimiento?</p>
-        <p>• ¿Qué incluye la garantía de un vehículo nuevo?</p>
-        <p>• ¿Qué tipo de seguro es recomendable para mi auto?</p>
-    </div>
-
-</div>
-
-    <div class="chat-container">
-        <h2>Pregunta a la IA</h2>
-
-        <div id="chat-box">
-            <div class="message bot">
-                <b>IA:</b> Hola, puedo ayudarte con finanzas básicas.
+                <p>• ¿Qué documentos necesito para financiar un auto?</p>
+                <p>• ¿Qué diferencia hay entre un auto nuevo y uno seminuevo?</p>
+                <p>• ¿Cada cuánto debo realizar el servicio de mantenimiento?</p>
+                <p>• ¿Qué incluye la garantía de un vehículo nuevo?</p>
+                <p>• ¿Qué tipo de seguro es recomendable para mi auto?</p>
             </div>
+
         </div>
 
-        <div class="input-area">
-            <input type="text" id="user-input" placeholder="Escribe tu pregunta financiera...">
-            <button onclick="sendMessage()">Enviar</button>
+        <div class="chat-container">
+
+            <h2>Pregunta a la IA</h2>
+
+            <div id="chat-box" aria-live="polite">
+                <div class="message bot">
+                    <b>IA:</b>
+                    Hola, puedo ayudarte con información sobre autos,
+                    financiamiento y servicios de agencias.
+                </div>
+            </div>
+
+            <form class="input-area" id="chat-form">
+                <input
+                    type="text"
+                    id="user-input"
+                    placeholder="Escribe tu pregunta sobre autos..."
+                    autocomplete="off"
+                    required
+                >
+
+                <button type="submit" id="send-button">
+                    Enviar
+                </button>
+            </form>
+
         </div>
+
     </div>
 
 </div>
 
 <script>
-async function sendMessage() {
-    const input = document.getElementById("user-input");
-    const chatBox = document.getElementById("chat-box");
+const chatForm = document.getElementById("chat-form");
+const input = document.getElementById("user-input");
+const chatBox = document.getElementById("chat-box");
+const sendButton = document.getElementById("send-button");
+
+function addMessage(sender, message, className) {
+    const messageDiv = document.createElement("div");
+    messageDiv.className = `message ${className}`;
+
+    const label = document.createElement("b");
+    label.textContent = `${sender}: `;
+
+    messageDiv.appendChild(label);
+    messageDiv.appendChild(document.createTextNode(message));
+
+    chatBox.appendChild(messageDiv);
+    chatBox.scrollTop = chatBox.scrollHeight;
+
+    return messageDiv;
+}
+
+chatForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
     const message = input.value.trim();
 
-    if (message === "") return;
+    if (!message || sendButton.disabled) return;
 
-    chatBox.innerHTML += `<div class="message user"><b>Tú:</b> ${message}</div>`;
+    addMessage("Tú", message, "user");
+
     input.value = "";
+    sendButton.disabled = true;
 
-    const typingDiv = document.createElement("div");
-    typingDiv.className = "message bot typing";
-    typingDiv.id = "typing";
+    const typing = addMessage("IA", "Estoy preparando tu respuesta...", "bot");
 
-    typingDiv.innerHTML = `
-        <b>IA:</b>
-        <span></span>
-        <span></span>
-        <span></span>
-    `;
+    try {
+        const response = await fetch("/chat", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ message })
+        });
 
-    chatBox.appendChild(typingDiv);
-    chatBox.scrollTop = chatBox.scrollHeight;
+        const data = await response.json();
 
-    const response = await fetch("/chat", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ message: message })
+        if (!response.ok) {
+            throw new Error(
+                data.reply || data.error ||
+                "No fue posible obtener una respuesta."
+            );
+        }
+
+        typing.replaceChildren();
+
+        const label = document.createElement("b");
+        label.textContent = "IA: ";
+
+        typing.appendChild(label);
+        typing.appendChild(
+            document.createTextNode(
+                data.reply || "No se recibió una respuesta."
+            )
+        );
+
+    } catch (error) {
+        typing.replaceChildren();
+
+        const label = document.createElement("b");
+        label.textContent = "IA: ";
+
+        typing.appendChild(label);
+        typing.appendChild(
+            document.createTextNode(
+                error.message ||
+                "No se pudo conectar con el servidor. Inténtalo de nuevo."
+            )
+        );
+
+    } finally {
+        sendButton.disabled = false;
+        input.focus();
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+});
+
+// Registrar el Service Worker de la PWA
+if ("serviceWorker" in navigator) {
+    window.addEventListener("load", async () => {
+        try {
+            await navigator.serviceWorker.register("/sw.js");
+            console.log("Service Worker registrado correctamente.");
+        } catch (error) {
+            console.error(
+                "Error al registrar el Service Worker:",
+                error
+            );
+        }
     });
-
-    const data = await response.json();
-
-    document.getElementById("typing")?.remove();
-
-    chatBox.innerHTML += `<div class="message bot"><b>IA:</b> ${data.reply}</div>`;
-    chatBox.scrollTop = chatBox.scrollHeight;
 }
 </script>
 
