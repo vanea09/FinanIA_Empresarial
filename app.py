@@ -1,9 +1,13 @@
 
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from pywebpush import webpush, WebPushException
+from py_vapid import Vapid
+from cryptography.hazmat.primitives import serialization
 from pathlib import Path
 from dotenv import load_dotenv
 import requests
+import base64
+import hmac
 import os
 import json
 
@@ -20,11 +24,67 @@ app = Flask(
 
 # Variables de entorno
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY")
-VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY")
-VAPID_EMAIL = os.getenv("VAPID_EMAIL", "mailto:admin@example.com")
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "").strip()
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "").strip()
+VAPID_EMAIL = os.getenv("VAPID_EMAIL", "mailto:admin@example.com").strip()
+# Token opcional para enviar una notificación a todos los suscriptores
+PUSH_ADMIN_TOKEN = os.getenv("PUSH_ADMIN_TOKEN", "").strip()
+
+if VAPID_EMAIL and not VAPID_EMAIL.startswith(("mailto:", "https://")):
+    VAPID_EMAIL = "mailto:" + VAPID_EMAIL
 
 SUBSCRIPTIONS_FILE = BASE_DIR / "subscriptions.json"
+
+
+def load_vapid():
+    """
+    Carga la clave privada VAPID desde cualquiera de estos formatos:
+    - Ruta a un archivo .pem (desarrollo local).
+    - Contenido PEM completo pegado en la variable (con saltos o con \\n).
+    - Texto base64url (raw de 32 bytes o DER), ideal para Render.
+    Si VAPID_PUBLIC_KEY no está configurada, se calcula desde la privada.
+    """
+    if not VAPID_PRIVATE_KEY:
+        return None, VAPID_PUBLIC_KEY
+
+    try:
+        key_path = (BASE_DIR / VAPID_PRIVATE_KEY)
+
+        if len(VAPID_PRIVATE_KEY) < 260 and key_path.is_file():
+            vapid = Vapid.from_file(str(key_path))
+        elif "-----BEGIN" in VAPID_PRIVATE_KEY:
+            pem = VAPID_PRIVATE_KEY.replace("\\n", "\n").encode()
+            vapid = Vapid.from_pem(pem)
+        else:
+            vapid = Vapid.from_string(VAPID_PRIVATE_KEY)
+
+        public_bytes = vapid.public_key.public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint
+        )
+        derived_public = base64.urlsafe_b64encode(
+            public_bytes
+        ).rstrip(b"=").decode("ascii")
+
+        if VAPID_PUBLIC_KEY and VAPID_PUBLIC_KEY != derived_public:
+            app.logger.warning(
+                "VAPID_PUBLIC_KEY no corresponde a la clave privada; "
+                "se usará la clave pública calculada."
+            )
+
+        return vapid, derived_public
+
+    except Exception:
+        app.logger.exception("VAPID_PRIVATE_KEY no es válida")
+        return None, VAPID_PUBLIC_KEY
+
+
+VAPID, VAPID_PUBLIC_KEY = load_vapid()
+
+if not VAPID:
+    app.logger.warning(
+        "Notificaciones push desactivadas: configura VAPID_PRIVATE_KEY."
+    )
 
 
 def load_subscriptions():
@@ -72,12 +132,60 @@ def service_worker():
 # Clave pública para las notificaciones push
 @app.route("/api/vapid-public-key", methods=["GET"])
 def vapid_public_key():
-    if not VAPID_PUBLIC_KEY:
+    if not VAPID or not VAPID_PUBLIC_KEY:
         return jsonify({
-            "error": "Falta configurar VAPID_PUBLIC_KEY."
+            "error": (
+                "Las notificaciones push no están configuradas en el "
+                "servidor (falta VAPID_PRIVATE_KEY)."
+            )
         }), 503
 
     return jsonify({"publicKey": VAPID_PUBLIC_KEY})
+
+
+def is_valid_subscription(subscription):
+    if not isinstance(subscription, dict):
+        return False
+
+    keys = subscription.get("keys")
+
+    return bool(
+        isinstance(subscription.get("endpoint"), str)
+        and subscription["endpoint"].startswith("https://")
+        and isinstance(keys, dict)
+        and keys.get("p256dh")
+        and keys.get("auth")
+    )
+
+
+def send_push(subscription, payload):
+    """
+    Envía una notificación. Devuelve (ok, status_code).
+    status_code 404/410 indica una suscripción caducada.
+    """
+    try:
+        webpush(
+            subscription_info=subscription,
+            data=json.dumps(payload),
+            vapid_private_key=VAPID,
+            vapid_claims={"sub": VAPID_EMAIL},
+            ttl=60,
+            timeout=15
+        )
+        return True, 201
+
+    except WebPushException as error:
+        status_code = getattr(
+            getattr(error, "response", None),
+            "status_code",
+            None
+        )
+        app.logger.warning("Error al enviar push (%s): %s", status_code, error)
+        return False, status_code
+
+    except Exception:
+        app.logger.exception("Error inesperado enviando push")
+        return False, None
 
 
 # Registrar una suscripción del navegador
@@ -85,19 +193,9 @@ def vapid_public_key():
 def subscribe():
     subscription = request.get_json(silent=True)
 
-    if not isinstance(subscription, dict):
-        return jsonify({"error": "Suscripción inválida."}), 400
-
-    keys = subscription.get("keys")
-
-    if (
-        not subscription.get("endpoint")
-        or not isinstance(keys, dict)
-        or not keys.get("p256dh")
-        or not keys.get("auth")
-    ):
+    if not is_valid_subscription(subscription):
         return jsonify({
-            "error": "Faltan datos de la suscripción."
+            "error": "Suscripción inválida o incompleta."
         }), 400
 
     subscriptions = load_subscriptions()
@@ -123,62 +221,83 @@ def subscribe():
     }), 201
 
 
-# Enviar una notificación push de prueba
+# Enviar una notificación push de prueba SOLO al usuario que la solicita
 @app.route("/api/push/test", methods=["POST"])
 def test_push():
-    if not VAPID_PUBLIC_KEY or not VAPID_PRIVATE_KEY:
+    if not VAPID:
         return jsonify({
-            "error": "Configura las claves VAPID."
+            "error": "Las notificaciones push no están configuradas en el servidor."
         }), 503
 
-    subscriptions = load_subscriptions()
+    subscription = request.get_json(silent=True)
 
-    if not subscriptions:
+    if not is_valid_subscription(subscription):
         return jsonify({
-            "error": "No hay suscripciones. Activa primero las notificaciones."
+            "error": "Envía la suscripción de este navegador para la prueba."
         }), 400
 
-    payload = json.dumps({
+    ok, status_code = send_push(subscription, {
         "title": "FinanIA Autos",
         "body": "¡Tu asesoría financiera está lista!",
         "url": "/"
     })
 
+    if ok:
+        return jsonify({
+            "message": "Notificación push enviada a este dispositivo."
+        })
+
+    if status_code in (404, 410):
+        return jsonify({
+            "error": "La suscripción caducó. Vuelve a activar las notificaciones.",
+            "expired": True
+        }), 410
+
+    return jsonify({
+        "error": (
+            "No se pudo enviar la notificación. "
+            "Revisa las claves VAPID y los registros del servidor."
+        )
+    }), 502
+
+
+# Enviar una notificación a TODOS los suscriptores (solo administrador)
+# Uso: POST /api/push/broadcast  con cabecera  Authorization: Bearer <PUSH_ADMIN_TOKEN>
+#      cuerpo JSON opcional: {"title": "...", "body": "...", "url": "/"}
+@app.route("/api/push/broadcast", methods=["POST"])
+def broadcast_push():
+    if not PUSH_ADMIN_TOKEN:
+        return jsonify({"error": "Envío masivo desactivado."}), 404
+
+    auth = request.headers.get("Authorization", "")
+    token = auth.removeprefix("Bearer ").strip()
+
+    if not hmac.compare_digest(token, PUSH_ADMIN_TOKEN):
+        return jsonify({"error": "No autorizado."}), 401
+
+    if not VAPID:
+        return jsonify({"error": "Configura las claves VAPID."}), 503
+
+    data = request.get_json(silent=True) or {}
+    payload = {
+        "title": str(data.get("title") or "FinanIA Autos")[:80],
+        "body": str(data.get("body") or "Consulta las novedades de tu asesoría.")[:200],
+        "url": "/"
+    }
+
+    subscriptions = load_subscriptions()
     sent = 0
     remaining = []
 
     for subscription in subscriptions:
-        try:
-            webpush(
-                subscription_info=subscription,
-                data=payload,
-                vapid_private_key=VAPID_PRIVATE_KEY,
-                vapid_claims={"sub": VAPID_EMAIL},
-                ttl=60
-            )
+        ok, status_code = send_push(subscription, payload)
 
+        if ok:
             sent += 1
+
+        # Eliminar suscripciones caducadas o inválidas
+        if status_code not in (404, 410):
             remaining.append(subscription)
-
-        except WebPushException as error:
-            status_code = getattr(
-                getattr(error, "response", None),
-                "status_code",
-                None
-            )
-
-            # Eliminar suscripciones caducadas o inválidas
-            if status_code not in (404, 410):
-                remaining.append(subscription)
-                app.logger.warning(
-                    "Error al enviar push: %s", error
-                )
-
-        except Exception:
-            remaining.append(subscription)
-            app.logger.exception(
-                "Error inesperado enviando push"
-            )
 
     try:
         save_subscriptions(remaining)
@@ -187,18 +306,8 @@ def test_push():
             "No se pudieron guardar las suscripciones actualizadas"
         )
 
-    if sent == 0:
-        return jsonify({
-            "error": (
-                "No se pudo enviar la notificación. "
-                "Revisa las claves VAPID y los registros del servidor."
-            )
-        }), 502
-
     return jsonify({
-        "message": (
-            f"Notificación push enviada a {sent} suscripción(es)."
-        )
+        "message": f"Notificación enviada a {sent} de {len(subscriptions)} suscripción(es)."
     })
 
 

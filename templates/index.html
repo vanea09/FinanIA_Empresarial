@@ -298,6 +298,13 @@ notificationButton.addEventListener("click", async () => {
             );
         }
 
+        // Las notificaciones push requieren conexión con el servidor
+        if (!navigator.onLine) {
+            notificationStatus.textContent =
+                "Sin conexión a internet. Las notificaciones push necesitan conexión; conéctate e inténtalo de nuevo.";
+            return;
+        }
+
         if (Notification.permission === "denied") {
             notificationStatus.textContent =
                 "Permiso denegado. Habilítalo desde la configuración del navegador.";
@@ -371,11 +378,33 @@ notificationButton.addEventListener("click", async () => {
         notificationStatus.textContent =
             "Suscripción guardada. Enviando notificación de prueba...";
 
-        const testResponse = await fetch("/api/push/test", {
-            method: "POST"
+        // La prueba se envía SOLO a este navegador (no a todos los usuarios)
+        const sendTest = sub => fetch("/api/push/test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(sub)
         });
 
-        const testData = await testResponse.json();
+        let testResponse = await sendTest(subscription);
+        let testData = await testResponse.json();
+
+        // Si la suscripción caducó, se crea una nueva y se reintenta una vez
+        if (testResponse.status === 410 && testData.expired) {
+            await subscription.unsubscribe();
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey
+            });
+
+            await fetch("/api/push/subscribe", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(subscription)
+            });
+
+            testResponse = await sendTest(subscription);
+            testData = await testResponse.json();
+        }
 
         if (!testResponse.ok) {
             throw new Error(
@@ -389,7 +418,9 @@ notificationButton.addEventListener("click", async () => {
     } catch (error) {
         console.error("Error en notificaciones push:", error);
         notificationStatus.textContent =
-            "No se pudo completar la configuración: " + error.message;
+            error instanceof TypeError && /fetch/i.test(error.message)
+                ? "No se pudo conectar con el servidor. Revisa tu conexión (o que DevTools no esté en modo Offline) e inténtalo de nuevo."
+                : "No se pudo completar la configuración: " + error.message;
     } finally {
         notificationButton.disabled = false;
     }
