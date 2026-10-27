@@ -1,9 +1,11 @@
-const CACHE_NAME = "finania-empresarial-v1";
+const CACHE_NAME = "finania-empresarial-v2";
 
 const APP_FILES = [
   "/",
   "/static/style.css",
-  "/static/manifest.json"
+  "/static/manifest.json",
+  "/static/icon-192.png",
+  "/static/icon-512.png"
 ];
 
 // Instalar el Service Worker

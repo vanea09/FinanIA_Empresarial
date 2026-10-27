@@ -151,3 +151,76 @@ button:hover {
 #chat-box {
     height: 650px;
 }
+
+/* ===== Funciones del dispositivo (push + cámara) ===== */
+.device-tools {
+    margin-top: 25px;
+    padding: 18px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 15px;
+}
+
+.device-tools h3 {
+    color: #4058e8;
+    margin-bottom: 8px;
+}
+
+.device-tools hr {
+    border: none;
+    border-top: 1px solid #e2e8f0;
+    margin: 20px 0;
+}
+
+.device-tools [role="status"] {
+    font-size: 0.92rem;
+    color: #475569;
+}
+
+button:disabled {
+    background: #94a3b8;
+    cursor: not-allowed;
+}
+
+.camera-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+#camera-video,
+#photo-canvas {
+    display: block;
+    width: 100%;
+    max-width: 400px;
+    height: auto;
+    border-radius: 12px;
+}
+
+#photo-canvas {
+    display: none;
+    margin-top: 10px;
+}
+
+#photo-canvas.has-photo {
+    display: block;
+}
+
+@media (max-width: 900px) {
+    .page {
+        flex-direction: column;
+        margin: 15px;
+        gap: 20px;
+    }
+
+    .info-box,
+    .chat-container {
+        width: auto;
+        min-height: auto;
+        padding: 20px;
+    }
+
+    #chat-box {
+        height: 400px;
+    }
+}

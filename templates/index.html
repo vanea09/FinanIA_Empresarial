@@ -16,6 +16,9 @@
 
     <link rel="manifest"
           href="{{ url_for('static', filename='manifest.json') }}">
+
+    <link rel="apple-touch-icon"
+          href="{{ url_for('static', filename='icon-192.png') }}">
 </head>
 
 <body>
@@ -69,6 +72,50 @@
                 <p>• ¿Qué incluye la garantía de un vehículo nuevo?</p>
                 <p>• ¿Qué tipo de seguro es recomendable para mi auto?</p>
             </div>
+
+            <section class="device-tools">
+                <h2>Funciones del dispositivo</h2>
+
+                <h3>Notificaciones push</h3>
+
+                <p id="notification-status" role="status" aria-live="polite">
+                    Notificaciones: todavía no configuradas.
+                </p>
+
+                <button id="enable-notifications" type="button">
+                    Activar notificaciones
+                </button>
+
+                <hr>
+
+                <h3>Fotografía del vehículo</h3>
+                <p>Puedes utilizar la cámara para fotografiar un automóvil.</p>
+
+                <button id="open-camera" type="button">
+                    Abrir cámara
+                </button>
+
+                <p id="camera-status" role="status" aria-live="polite">
+                    Cámara cerrada.
+                </p>
+
+                <div id="camera-area" hidden>
+                    <video id="camera-video" autoplay playsinline muted></video>
+                </div>
+
+                <p class="camera-actions">
+                    <button id="take-photo" type="button" disabled>
+                        Tomar fotografía
+                    </button>
+
+                    <button id="close-camera" type="button" hidden>
+                        Cerrar cámara
+                    </button>
+                </p>
+
+                <canvas id="photo-canvas"
+                        aria-label="Fotografía capturada"></canvas>
+            </section>
 
         </div>
 
@@ -205,6 +252,248 @@ if ("serviceWorker" in navigator) {
         }
     });
 }
+
+
+// ======================================
+// NOTIFICACIONES PUSH
+// ======================================
+
+const notificationStatus =
+    document.getElementById("notification-status");
+const notificationButton =
+    document.getElementById("enable-notifications");
+
+function decodeVapidKey(base64String) {
+    const padding = "=".repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+        .replace(/-/g, "+")
+        .replace(/_/g, "/");
+    const raw = atob(base64);
+
+    return Uint8Array.from(raw, character => character.charCodeAt(0));
+}
+
+// Mostrar el estado del permiso al cargar la página
+if ("Notification" in window) {
+    if (Notification.permission === "granted") {
+        notificationStatus.textContent =
+            "Permiso concedido. Pulsa el botón para enviar una notificación de prueba.";
+    } else if (Notification.permission === "denied") {
+        notificationStatus.textContent =
+            "Permiso denegado. Habilítalo desde la configuración del navegador.";
+    }
+}
+
+notificationButton.addEventListener("click", async () => {
+    notificationButton.disabled = true;
+
+    try {
+        if (
+            !("serviceWorker" in navigator) ||
+            !("PushManager" in window) ||
+            !("Notification" in window)
+        ) {
+            throw new Error(
+                "Tu navegador no admite las funciones necesarias para las notificaciones push."
+            );
+        }
+
+        if (Notification.permission === "denied") {
+            notificationStatus.textContent =
+                "Permiso denegado. Habilítalo desde la configuración del navegador.";
+            return;
+        }
+
+        notificationStatus.textContent =
+            "Solicitando permiso para las notificaciones...";
+
+        const permission = await Notification.requestPermission();
+
+        if (permission !== "granted") {
+            notificationStatus.textContent =
+                permission === "denied"
+                    ? "Permiso denegado. Habilítalo desde la configuración del navegador."
+                    : "No se concedió el permiso de notificaciones.";
+            return;
+        }
+
+        notificationStatus.textContent = "Configurando notificaciones push...";
+
+        const registration = await navigator.serviceWorker.ready;
+        const keyResponse = await fetch("/api/vapid-public-key");
+        const keyData = await keyResponse.json();
+
+        if (!keyResponse.ok || !keyData.publicKey) {
+            throw new Error(
+                keyData.error || "No se pudo obtener la clave pública."
+            );
+        }
+
+        const applicationServerKey = decodeVapidKey(keyData.publicKey);
+        let subscription = await registration.pushManager.getSubscription();
+
+        // Si la suscripción usa otra clave VAPID, se renueva
+        if (subscription) {
+            const currentKey = subscription.options.applicationServerKey;
+            const sameKey = currentKey &&
+                currentKey.byteLength === applicationServerKey.length &&
+                new Uint8Array(currentKey).every(
+                    (byte, index) => byte === applicationServerKey[index]
+                );
+
+            if (!sameKey) {
+                await subscription.unsubscribe();
+                subscription = null;
+            }
+        }
+
+        if (!subscription) {
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey
+            });
+        }
+
+        const saveResponse = await fetch("/api/push/subscribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(subscription)
+        });
+
+        const saveData = await saveResponse.json();
+
+        if (!saveResponse.ok) {
+            throw new Error(
+                saveData.error || "No se pudo guardar la suscripción."
+            );
+        }
+
+        notificationStatus.textContent =
+            "Suscripción guardada. Enviando notificación de prueba...";
+
+        const testResponse = await fetch("/api/push/test", {
+            method: "POST"
+        });
+
+        const testData = await testResponse.json();
+
+        if (!testResponse.ok) {
+            throw new Error(
+                testData.error || "No se pudo enviar la notificación push."
+            );
+        }
+
+        notificationStatus.textContent =
+            "¡Listo! " +
+            (testData.message || "Notificación push enviada correctamente.");
+    } catch (error) {
+        console.error("Error en notificaciones push:", error);
+        notificationStatus.textContent =
+            "No se pudo completar la configuración: " + error.message;
+    } finally {
+        notificationButton.disabled = false;
+    }
+});
+
+
+// ======================================
+// CÁMARA: ABRIR, TOMAR FOTO Y CERRAR
+// ======================================
+
+const cameraArea = document.getElementById("camera-area");
+const video = document.getElementById("camera-video");
+const canvas = document.getElementById("photo-canvas");
+const cameraStatus = document.getElementById("camera-status");
+
+const openCameraButton = document.getElementById("open-camera");
+const takePhotoButton = document.getElementById("take-photo");
+const closeCameraButton = document.getElementById("close-camera");
+
+let cameraStream = null;
+
+function stopCameraStream() {
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+    }
+
+    video.srcObject = null;
+    takePhotoButton.disabled = true;
+    cameraArea.hidden = true;
+    closeCameraButton.hidden = true;
+}
+
+openCameraButton.addEventListener("click", async () => {
+    stopCameraStream();
+    cameraStatus.textContent = "Solicitando acceso a la cámara...";
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+        cameraStatus.textContent =
+            "La cámara requiere HTTPS o localhost y un navegador compatible.";
+        return;
+    }
+
+    try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" },
+            audio: false
+        });
+
+        video.srcObject = cameraStream;
+        cameraArea.hidden = false;
+        closeCameraButton.hidden = false;
+
+        await video.play();
+
+        takePhotoButton.disabled = false;
+        cameraStatus.textContent = "Cámara activada correctamente.";
+    } catch (error) {
+        stopCameraStream();
+
+        if (["NotAllowedError", "PermissionDeniedError", "SecurityError"]
+            .includes(error.name)) {
+            cameraStatus.textContent =
+                "Permiso de cámara denegado. Habilítalo desde la configuración del navegador y vuelve a intentarlo.";
+        } else if (["NotFoundError", "DevicesNotFoundError"].includes(error.name)) {
+            cameraStatus.textContent =
+                "No se encontró una cámara conectada al dispositivo.";
+        } else if (["NotReadableError", "TrackStartError"].includes(error.name)) {
+            cameraStatus.textContent =
+                "La cámara está ocupada por otra aplicación. Ciérrala e inténtalo de nuevo.";
+        } else {
+            cameraStatus.textContent =
+                "No se pudo abrir la cámara. Comprueba los permisos y que el dispositivo esté disponible.";
+        }
+
+        console.error("Error al abrir la cámara:", error.name, error.message);
+    }
+});
+
+takePhotoButton.addEventListener("click", () => {
+    if (!cameraStream || !video.videoWidth || !video.videoHeight) {
+        cameraStatus.textContent =
+            "La cámara todavía no está lista. Espera a que aparezca la imagen.";
+        return;
+    }
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const context = canvas.getContext("2d");
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.classList.add("has-photo");
+
+    cameraStatus.textContent =
+        "Fotografía capturada. Puedes hacer una nueva cuando quieras.";
+});
+
+closeCameraButton.addEventListener("click", () => {
+    stopCameraStream();
+    cameraStatus.textContent =
+        "Cámara cerrada. La fotografía capturada se conserva.";
+});
+
+window.addEventListener("pagehide", stopCameraStream);
 </script>
 
 </body>
